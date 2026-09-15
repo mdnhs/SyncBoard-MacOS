@@ -28,7 +28,9 @@ final class ClipboardManager {
         // Polling is the only reliable way to observe NSPasteboard.general changes
         // from other apps; there is no system notification for pasteboard writes.
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.checkPasteboard()
+            Task { @MainActor [weak self] in
+                self?.checkPasteboard()
+            }
         }
     }
 

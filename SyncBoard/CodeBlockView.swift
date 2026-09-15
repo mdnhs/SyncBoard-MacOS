@@ -100,25 +100,18 @@ enum CodeSyntaxHighlighter {
 
         let nsLine = line as NSString
         let fullRange = NSRange(location: 0, length: nsLine.length)
-        var segments: [Text] = []
-        var lastIndex = 0
+        var attributed = AttributedString(line)
+        attributed.foregroundColor = .secondary
 
         for match in regex.matches(in: line, range: fullRange) {
-            if match.range.location > lastIndex {
-                let gap = NSRange(location: lastIndex, length: match.range.location - lastIndex)
-                segments.append(Text(nsLine.substring(with: gap)).foregroundColor(.secondary))
+            if let range = Range(match.range, in: line),
+               let lower = AttributedString.Index(range.lowerBound, within: attributed),
+               let upper = AttributedString.Index(range.upperBound, within: attributed) {
+                attributed[lower..<upper].foregroundColor = color(for: match)
             }
-            let matched = nsLine.substring(with: match.range)
-            segments.append(Text(matched).foregroundColor(color(for: match)))
-            lastIndex = match.range.location + match.range.length
         }
 
-        if lastIndex < nsLine.length {
-            let tail = NSRange(location: lastIndex, length: nsLine.length - lastIndex)
-            segments.append(Text(nsLine.substring(with: tail)).foregroundColor(.secondary))
-        }
-
-        return segments.reduce(Text(""), +)
+        return Text(attributed)
     }
 
     private static func regex(for language: CodeLanguage) -> NSRegularExpression? {
