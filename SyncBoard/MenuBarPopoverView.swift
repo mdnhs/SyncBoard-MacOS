@@ -169,10 +169,15 @@ struct MenuBarPopoverView: View {
                 ForEach(groupedHistory, id: \.section) { group in
                     Section {
                         ForEach(group.items) { item in
-                            let isLastInList = item.id == filteredHistory.last?.id
+                            let index = filteredHistory.firstIndex(where: { $0.id == item.id }) ?? 0
+                            // 4th item in the visible view area (index 3) or the last item if fewer than 4 items
+                            let isStacked = (index == 3 && filteredHistory.count > 4) || (index == filteredHistory.count - 1 && filteredHistory.count > 1 && filteredHistory.count <= 4)
+                            let remainingCount = filteredHistory.count - 4
+
                             PopoverRow(
                                 item: item,
-                                isLastInList: isLastInList && filteredHistory.count > 1
+                                isStacked: isStacked,
+                                remainingCount: isStacked && remainingCount > 0 ? remainingCount : 0
                             ) {
                                 clipboardManager.copyToPasteboard(item)
                                 dismissPopover()
@@ -185,7 +190,7 @@ struct MenuBarPopoverView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 4)
-            .padding(.bottom, 30)
+            .padding(.bottom, 24)
             .scrollControlSize(.mini)
         }
         .safeAreaInset(edge: .bottom) {
@@ -225,14 +230,15 @@ struct MenuBarPopoverView: View {
 
 private struct PopoverRow: View {
     let item: ClipboardItem
-    let isLastInList: Bool
+    let isStacked: Bool
+    let remainingCount: Int
     let onCopy: () -> Void
     @State private var isHovering = false
     @State private var isButtonHovering = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            if isLastInList {
+            if isStacked {
                 stackedDeckBackground
             }
 
@@ -261,7 +267,7 @@ private struct PopoverRow: View {
                 }
             }
         }
-        .padding(.bottom, isLastInList ? 18 : 0)
+        .padding(.bottom, isStacked ? 18 : 0)
         .zIndex(isHovering || isButtonHovering ? 100 : 1)
         .animation(.easeOut(duration: 0.12), value: isHovering)
         .animation(.easeOut(duration: 0.12), value: isButtonHovering)
@@ -269,37 +275,53 @@ private struct PopoverRow: View {
 
     private var stackedDeckBackground: some View {
         ZStack(alignment: .bottom) {
-            // Layer 2 (Deepest back layer)
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.primary.opacity(0.12))
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color(nsColor: .windowBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
-                .padding(.horizontal, 24)
-                .frame(height: 52)
-                .offset(y: 16)
+            // Layer 2 (Bottom-most peek layer)
+            ZStack {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.primary.opacity(0.04))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.8)
+                    )
+                    .shadow(color: .black.opacity(0.15), radius: 5, y: 2)
+            }
+            .padding(.horizontal, 24)
+            .frame(height: 50)
+            .offset(y: 16)
 
-            // Layer 1 (Middle layer)
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.primary.opacity(0.06))
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color(nsColor: .windowBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
-                .padding(.horizontal, 12)
-                .frame(height: 52)
-                .offset(y: 8)
+            // Layer 1 (Middle peek layer with "+N more" indicator if remaining)
+            ZStack {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.primary.opacity(0.08))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.primary.opacity(0.16), lineWidth: 0.8)
+                    )
+                    .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+
+                if remainingCount > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.stack.3d.down.right.fill")
+                            .font(.system(size: 9))
+                        Text("\(remainingCount) more")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 2)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 50)
+            .offset(y: 8)
         }
     }
 
