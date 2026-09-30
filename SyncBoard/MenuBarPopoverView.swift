@@ -170,7 +170,7 @@ struct MenuBarPopoverView: View {
                     Section {
                         ForEach(group.items) { item in
                             let index = filteredHistory.firstIndex(where: { $0.id == item.id }) ?? 0
-                            // 4th item in the visible view area (index 3) or the last item if fewer than 4 items
+                            // 4th item in the initial viewport (index 3) or the last item if fewer than 4 items
                             let isStacked = (index == 3 && filteredHistory.count > 4) || (index == filteredHistory.count - 1 && filteredHistory.count > 1 && filteredHistory.count <= 4)
                             let remainingCount = filteredHistory.count - 4
 
@@ -181,6 +181,12 @@ struct MenuBarPopoverView: View {
                             ) {
                                 clipboardManager.copyToPasteboard(item)
                                 dismissPopover()
+                            }
+                            .scrollTransition(.interactive) { content, phase in
+                                content
+                                    .scaleEffect(phase.isIdentity ? 1.0 : (phase.value > 0 ? 0.94 : 0.98), anchor: .top)
+                                    .opacity(phase.isIdentity ? 1.0 : (phase.value > 0 ? 0.72 : 0.9))
+                                    .offset(y: phase.isIdentity ? 0 : (phase.value > 0 ? 14 : -4))
                             }
                         }
                     } header: {
