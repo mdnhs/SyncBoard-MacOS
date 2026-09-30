@@ -10,6 +10,7 @@ struct MenuBarPopoverView: View {
     @Environment(\.dismissPopover) private var dismissPopover
     @State private var searchText = ""
     @State private var selectedTab: ClipboardContentKind?
+    @State private var isStackExpanded = false
     @FocusState private var isSearchFocused: Bool
 
     private var filteredHistory: [ClipboardItem] {
@@ -21,9 +22,16 @@ struct MenuBarPopoverView: View {
         return items.filter { $0.text.localizedCaseInsensitiveContains(searchText) }
     }
 
+    private var displayedHistory: [ClipboardItem] {
+        if isStackExpanded || !searchText.isEmpty || filteredHistory.count <= 4 {
+            return filteredHistory
+        }
+        return Array(filteredHistory.prefix(4))
+    }
+
     private var groupedHistory: [(section: String, items: [ClipboardItem])] {
         let calendar = Calendar.current
-        let groups = Dictionary(grouping: filteredHistory) { item -> String in
+        let groups = Dictionary(grouping: displayedHistory) { item -> String in
             if calendar.isDateInToday(item.date) {
                 return "Today"
             } else if calendar.isDateInYesterday(item.date) {
@@ -170,23 +178,31 @@ struct MenuBarPopoverView: View {
                     Section {
                         ForEach(group.items) { item in
                             let index = filteredHistory.firstIndex(where: { $0.id == item.id }) ?? 0
-                            // 4th item in the initial viewport (index 3) or the last item if fewer than 4 items
-                            let isStacked = (index == 3 && filteredHistory.count > 4) || (index == filteredHistory.count - 1 && filteredHistory.count > 1 && filteredHistory.count <= 4)
+                            let isCollapsedStackItem = !isStackExpanded && searchText.isEmpty && index == 3 && filteredHistory.count > 4
                             let remainingCount = filteredHistory.count - 4
 
                             PopoverRow(
                                 item: item,
-                                isStacked: isStacked,
-                                remainingCount: isStacked && remainingCount > 0 ? remainingCount : 0
+                                isStacked: isCollapsedStackItem,
+                                remainingCount: isCollapsedStackItem ? remainingCount : 0,
+                                onExpandStack: {
+                                    withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                                        isStackExpanded = true
+                                    }
+                                }
                             ) {
                                 clipboardManager.copyToPasteboard(item)
                                 dismissPopover()
                             }
+                            .transition(.asymmetric(
+                                insertion: .scale(scale: 0.94).combined(with: .opacity).combined(with: .offset(y: -12)),
+                                removal: .opacity
+                            ))
                             .scrollTransition(.interactive) { content, phase in
                                 content
-                                    .scaleEffect(phase.isIdentity ? 1.0 : (phase.value > 0 ? 0.94 : 0.98), anchor: .top)
-                                    .opacity(phase.isIdentity ? 1.0 : (phase.value > 0 ? 0.72 : 0.9))
-                                    .offset(y: phase.isIdentity ? 0 : (phase.value > 0 ? 14 : -4))
+                                    .scaleEffect(phase.isIdentity ? 1.0 : (phase.value > 0 ? 0.95 : 0.98), anchor: .top)
+                                    .opacity(phase.isIdentity ? 1.0 : (phase.value > 0 ? 0.75 : 0.9))
+                                    .offset(y: phase.isIdentity ? 0 : (phase.value > 0 ? 12 : -4))
                             }
                         }
                     } header: {
@@ -199,6 +215,16 @@ struct MenuBarPopoverView: View {
             .padding(.bottom, 24)
             .scrollControlSize(.mini)
         }
+        .simultaneousGesture(
+            // Scrolling down while in collapsed mode automatically triggers stack expansion
+            DragGesture(minimumDistance: 10).onChanged { value in
+                if !isStackExpanded && value.translation.height < -15 && filteredHistory.count > 4 {
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                        isStackExpanded = true
+                    }
+                }
+            }
+        )
         .safeAreaInset(edge: .bottom) {
             footer
         }
@@ -225,7 +251,29 @@ struct MenuBarPopoverView: View {
             .buttonStyle(.plain)
             .foregroundStyle(clipboardManager.history.isEmpty ? Color.secondary : Color.red)
             .disabled(clipboardManager.history.isEmpty)
+
             Spacer()
+
+            if isStackExpanded && filteredHistory.count > 4 && searchText.isEmpty {
+                Button {
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                        isStackExpanded = false
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Collapse Stack")
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.accentColor.opacity(0.1), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity.combined(with: .scale))
+            }
         }
         .font(.callout)
         .padding(.horizontal, 14)
@@ -238,6 +286,7 @@ private struct PopoverRow: View {
     let item: ClipboardItem
     let isStacked: Bool
     let remainingCount: Int
+    var onExpandStack: (() -> Void)? = nil
     let onCopy: () -> Void
     @State private var isHovering = false
     @State private var isButtonHovering = false
@@ -273,16 +322,18 @@ private struct PopoverRow: View {
                 }
             }
         }
-        .padding(.bottom, isStacked ? 18 : 0)
+        .padding(.bottom, isStacked ? 22 : 0)
         .zIndex(isHovering || isButtonHovering ? 100 : 1)
         .animation(.easeOut(duration: 0.12), value: isHovering)
         .animation(.easeOut(duration: 0.12), value: isButtonHovering)
     }
 
     private var stackedDeckBackground: some View {
-        ZStack(alignment: .bottom) {
-            // Layer 2 (Bottom-most peek layer)
-            ZStack {
+        Button {
+            onExpandStack?()
+        } label: {
+            ZStack(alignment: .bottom) {
+                // Layer 2 (Bottom-most peek layer)
                 RoundedRectangle(cornerRadius: 14)
                     .fill(Color(nsColor: .windowBackgroundColor))
                     .overlay(
@@ -294,41 +345,43 @@ private struct PopoverRow: View {
                             .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.8)
                     )
                     .shadow(color: .black.opacity(0.15), radius: 5, y: 2)
-            }
-            .padding(.horizontal, 24)
-            .frame(height: 50)
-            .offset(y: 16)
+                    .padding(.horizontal, 24)
+                    .frame(height: 50)
+                    .offset(y: 18)
 
-            // Layer 1 (Middle peek layer with "+N more" indicator if remaining)
-            ZStack {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(Color.primary.opacity(0.08))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .strokeBorder(Color.primary.opacity(0.16), lineWidth: 0.8)
-                    )
-                    .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+                // Layer 1 (Middle peek layer with "+N more" indicator)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Color.primary.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .strokeBorder(Color.primary.opacity(0.16), lineWidth: 0.8)
+                        )
+                        .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
 
-                if remainingCount > 0 {
-                    HStack(spacing: 4) {
-                        Image(systemName: "square.stack.3d.down.right.fill")
-                            .font(.system(size: 9))
-                        Text("\(remainingCount) more")
-                            .font(.system(size: 10, weight: .semibold))
+                    if remainingCount > 0 {
+                        HStack(spacing: 5) {
+                            Image(systemName: "square.stack.3d.down.right.fill")
+                                .font(.system(size: 10))
+                            Text("\(remainingCount) more • Click or scroll to expand")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.bottom, 2)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
                     }
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 2)
-                    .frame(maxHeight: .infinity, alignment: .bottom)
                 }
+                .padding(.horizontal, 12)
+                .frame(height: 50)
+                .offset(y: 9)
             }
-            .padding(.horizontal, 12)
-            .frame(height: 50)
-            .offset(y: 8)
         }
+        .buttonStyle(.plain)
+        .help("Click to expand full stack")
     }
 
     private func floatingTooltip(_ text: String) -> some View {
