@@ -185,7 +185,7 @@ struct MenuBarPopoverView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 4)
-            .padding(.bottom, 22)
+            .padding(.bottom, 30)
             .scrollControlSize(.mini)
         }
         .safeAreaInset(edge: .bottom) {
@@ -230,9 +230,6 @@ private struct PopoverRow: View {
     @State private var isHovering = false
     @State private var isButtonHovering = false
 
-    // The chevron button must be a sibling of the copy target rather than nested
-    // inside it; a NavigationLink placed within the card's tap area never
-    // receives the click, because the card's gesture consumes it first.
     var body: some View {
         ZStack(alignment: .bottom) {
             if isLastInList {
@@ -264,7 +261,7 @@ private struct PopoverRow: View {
                 }
             }
         }
-        .padding(.bottom, isLastInList ? 14 : 0)
+        .padding(.bottom, isLastInList ? 18 : 0)
         .zIndex(isHovering || isButtonHovering ? 100 : 1)
         .animation(.easeOut(duration: 0.12), value: isHovering)
         .animation(.easeOut(duration: 0.12), value: isButtonHovering)
@@ -272,29 +269,37 @@ private struct PopoverRow: View {
 
     private var stackedDeckBackground: some View {
         ZStack(alignment: .bottom) {
-            // Layer 2 (Bottom-most peek layer)
+            // Layer 2 (Deepest back layer)
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.4))
+                .fill(Color.primary.opacity(0.12))
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(Color.primary.opacity(0.05), lineWidth: 0.5)
+                        .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.04), radius: 3, y: 2)
-                .padding(.horizontal, 20)
-                .frame(height: 48)
-                .offset(y: 12)
+                .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
+                .padding(.horizontal, 24)
+                .frame(height: 52)
+                .offset(y: 16)
 
-            // Layer 1 (Middle peek layer)
+            // Layer 1 (Middle layer)
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.72))
+                .fill(Color.primary.opacity(0.06))
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                        .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-                .padding(.horizontal, 10)
-                .frame(height: 48)
-                .offset(y: 6)
+                .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+                .padding(.horizontal, 12)
+                .frame(height: 52)
+                .offset(y: 8)
         }
     }
 
