@@ -169,7 +169,11 @@ struct MenuBarPopoverView: View {
                 ForEach(groupedHistory, id: \.section) { group in
                     Section {
                         ForEach(group.items) { item in
-                            PopoverRow(item: item) {
+                            let isLastInList = item.id == filteredHistory.last?.id
+                            PopoverRow(
+                                item: item,
+                                isLastInList: isLastInList && filteredHistory.count > 1
+                            ) {
                                 clipboardManager.copyToPasteboard(item)
                                 dismissPopover()
                             }
@@ -181,7 +185,7 @@ struct MenuBarPopoverView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 4)
-            .padding(.bottom, 12)
+            .padding(.bottom, 22)
             .scrollControlSize(.mini)
         }
         .safeAreaInset(edge: .bottom) {
@@ -221,6 +225,7 @@ struct MenuBarPopoverView: View {
 
 private struct PopoverRow: View {
     let item: ClipboardItem
+    let isLastInList: Bool
     let onCopy: () -> Void
     @State private var isHovering = false
     @State private var isButtonHovering = false
@@ -229,33 +234,68 @@ private struct PopoverRow: View {
     // inside it; a NavigationLink placed within the card's tap area never
     // receives the click, because the card's gesture consumes it first.
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            card
-                .contentShape(RoundedRectangle(cornerRadius: 14))
-                .onTapGesture(perform: onCopy)
-                .onHover { isHovering = $0 }
+        ZStack(alignment: .bottom) {
+            if isLastInList {
+                stackedDeckBackground
+            }
 
-            NavigationLink(value: item) {
-                chevronButton
+            ZStack(alignment: .topTrailing) {
+                card
+                    .contentShape(RoundedRectangle(cornerRadius: 14))
+                    .onTapGesture(perform: onCopy)
+                    .onHover { isHovering = $0 }
+
+                NavigationLink(value: item) {
+                    chevronButton
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 12)
+                .padding(.trailing, 12)
             }
-            .buttonStyle(.plain)
-            .padding(.top, 12)
-            .padding(.trailing, 12)
-        }
-        .overlay(alignment: .topTrailing) {
-            if isButtonHovering {
-                floatingTooltip("Click to view details")
-                    .offset(x: 0, y: -26)
-                    .zIndex(999)
-            } else if isHovering {
-                floatingTooltip("Click to copy")
-                    .offset(x: -36, y: -26)
-                    .zIndex(999)
+            .overlay(alignment: .topTrailing) {
+                if isButtonHovering {
+                    floatingTooltip("Click to view details")
+                        .offset(x: 0, y: -26)
+                        .zIndex(999)
+                } else if isHovering {
+                    floatingTooltip("Click to copy")
+                        .offset(x: -36, y: -26)
+                        .zIndex(999)
+                }
             }
         }
+        .padding(.bottom, isLastInList ? 14 : 0)
         .zIndex(isHovering || isButtonHovering ? 100 : 1)
         .animation(.easeOut(duration: 0.12), value: isHovering)
         .animation(.easeOut(duration: 0.12), value: isButtonHovering)
+    }
+
+    private var stackedDeckBackground: some View {
+        ZStack(alignment: .bottom) {
+            // Layer 2 (Bottom-most peek layer)
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.4))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.primary.opacity(0.05), lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(0.04), radius: 3, y: 2)
+                .padding(.horizontal, 20)
+                .frame(height: 48)
+                .offset(y: 12)
+
+            // Layer 1 (Middle peek layer)
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.72))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                .padding(.horizontal, 10)
+                .frame(height: 48)
+                .offset(y: 6)
+        }
     }
 
     private func floatingTooltip(_ text: String) -> some View {
