@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var showClearConfirmation = false
     @State private var copiedConfirmation = false
+    private var driveSync: GoogleDriveSyncManager { .shared }
 
     private enum SidebarCategory: Hashable, Identifiable {
         case all
@@ -187,6 +188,8 @@ struct ContentView: View {
     private var sidebarFooter: some View {
         VStack(spacing: 8) {
             Divider()
+            googleDriveRow
+            Divider()
             HStack {
                 Button(role: .destructive) {
                     showClearConfirmation = true
@@ -208,6 +211,50 @@ struct ContentView: View {
             .padding(.vertical, 8)
         }
         .background(.bar)
+    }
+
+    private var googleDriveRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: driveSync.isConnected ? "checkmark.icloud.fill" : "icloud")
+                .foregroundStyle(driveSync.isConnected ? Color.green : Color.secondary)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(driveSync.isConnected ? "Synced with Google Drive" : "Google Drive")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                if driveSync.isConnected, let email = driveSync.accountEmail {
+                    Text(email)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else if let error = driveSync.lastError {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            if driveSync.isSyncing {
+                ProgressView()
+                    .controlSize(.small)
+            } else if driveSync.isConnected {
+                Button("Disconnect") { driveSync.disconnect() }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Button("Connect") { Task { await driveSync.connect() } }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Column 2: Content List

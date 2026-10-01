@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         ClipboardManager.shared.startMonitoring()
         UNUserNotificationCenter.current().delegate = self
         CopyToast.requestAuthorizationIfNeeded()
+        GoogleDriveSyncManager.shared.startPeriodicSync()
         setupStatusItem()
         setupPopover()
         setupHotKey()

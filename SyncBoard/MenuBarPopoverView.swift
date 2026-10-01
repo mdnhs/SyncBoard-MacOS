@@ -11,6 +11,7 @@ struct MenuBarPopoverView: View {
     @State private var searchText = ""
     @State private var selectedTab: ClipboardContentKind?
     @FocusState private var isSearchFocused: Bool
+    private var driveSync: GoogleDriveSyncManager { .shared }
 
     private var filteredHistory: [ClipboardItem] {
         var items = clipboardManager.history
@@ -47,6 +48,9 @@ struct MenuBarPopoverView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 header
+                if let error = driveSync.lastError {
+                    driveSyncErrorBanner(error)
+                }
                 searchField
                 filterTabs
                 if filteredHistory.isEmpty {
@@ -81,10 +85,68 @@ struct MenuBarPopoverView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            googleDriveButton
         }
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .padding(.bottom, 10)
+    }
+
+    private var googleDriveButton: some View {
+        Menu {
+            if driveSync.isConnected {
+                if let email = driveSync.accountEmail {
+                    Text(email)
+                }
+                Button("Sync Now") { driveSync.syncNow() }
+                Button("Disconnect", role: .destructive) { driveSync.disconnect() }
+            } else {
+                Button("Connect Google Drive") {
+                    Task { await driveSync.connect() }
+                }
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(driveSync.isConnected ? Color.green.opacity(0.15) : Color.primary.opacity(0.06))
+                    .frame(width: 30, height: 30)
+                if driveSync.isSyncing {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: driveSync.isConnected ? "checkmark.icloud.fill" : "icloud")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(driveSync.isConnected ? Color.green : Color.secondary)
+                }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(driveSync.isConnected ? "Synced with Google Drive (\(driveSync.accountEmail ?? ""))" : "Connect Google Drive")
+    }
+
+    private func driveSyncErrorBanner(_ message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption2)
+                .foregroundStyle(.red)
+            Text(message)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer()
+            Button {
+                driveSync.dismissError()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.red.opacity(0.08))
     }
 
     private var searchField: some View {

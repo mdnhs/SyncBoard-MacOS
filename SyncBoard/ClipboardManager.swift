@@ -55,10 +55,24 @@ final class ClipboardManager {
     func delete(_ item: ClipboardItem) {
         history.removeAll { $0.id == item.id }
         saveHistory()
+        GoogleDriveSyncManager.shared.scheduleSync()
     }
 
     func clearAll() {
         history.removeAll()
+        saveHistory()
+        GoogleDriveSyncManager.shared.scheduleSync()
+    }
+
+    /// Replaces local history with the result of a Google Drive merge,
+    /// re-applying the same cap as local inserts so a sync can't grow the
+    /// list past `maxHistoryCount`.
+    func replaceHistory(with items: [ClipboardItem]) {
+        var merged = items.sorted { $0.date > $1.date }
+        if merged.count > maxHistoryCount {
+            merged.removeLast(merged.count - maxHistoryCount)
+        }
+        history = merged
         saveHistory()
     }
 
@@ -75,6 +89,7 @@ final class ClipboardManager {
             history.removeLast(history.count - maxHistoryCount)
         }
         saveHistory()
+        GoogleDriveSyncManager.shared.scheduleSync()
     }
 
     private func saveHistory() {
