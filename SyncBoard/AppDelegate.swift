@@ -37,11 +37,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func setupPopover() {
         popover.delegate = self
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(
+        let hostingController = NSHostingController(
             rootView: MenuBarPopoverView()
                 .environment(ClipboardManager.shared)
                 .environment(\.dismissPopover, { [weak self] in self?.popover.performClose(nil) })
         )
+        // The popover's contentSize is set explicitly in updatePopoverSize(for:), so the
+        // hosting controller must not derive its own size constraints from the SwiftUI
+        // content's ideal size. Left at the default (.standardBounds), the ScrollView's
+        // ideal height (= the full, unclipped content height) fights that fixed size and
+        // the scrollable area ends up clamped short, making the list appear to get stuck
+        // partway through instead of scrolling all the way.
+        hostingController.sizingOptions = []
+        popover.contentViewController = hostingController
     }
 
     /// Sizes the popover to 72% of the status item's current screen height,
