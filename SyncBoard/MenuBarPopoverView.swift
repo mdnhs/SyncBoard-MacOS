@@ -241,7 +241,7 @@ private struct PopoverRow: View {
                 .onHover { isHovering = $0 }
 
             NavigationLink(value: item) {
-                chevronButton
+                detailButton
             }
             .buttonStyle(.plain)
             .padding(.top, 12)
@@ -283,11 +283,11 @@ private struct PopoverRow: View {
             .transition(.opacity.combined(with: .scale(scale: 0.92)))
     }
 
-    private var chevronButton: some View {
+    private var detailButton: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
                 .fill(isButtonHovering ? Color.primary.opacity(0.1) : Color.primary.opacity(0.05))
-            Image(systemName: "chevron.right")
+            Image(systemName: "eye")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(isButtonHovering ? .primary : .secondary)
         }

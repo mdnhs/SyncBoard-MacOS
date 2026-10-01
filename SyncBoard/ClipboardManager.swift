@@ -49,6 +49,7 @@ final class ClipboardManager {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
         lastChangeCount = pasteboard.changeCount
+        CopyToast.show(for: text)
     }
 
     func delete(_ item: ClipboardItem) {

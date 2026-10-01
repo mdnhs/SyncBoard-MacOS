@@ -6,19 +6,33 @@
 import AppKit
 import Carbon.HIToolbox
 import SwiftUI
+import UserNotifications
 
 /// Owns the menu bar icon and its quick-access popover. The main app window
 /// (opened via the Dock icon) is managed entirely by SwiftUI's WindowGroup and
 /// is intentionally not touched here.
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNotificationCenterDelegate {
     private var statusItem: NSStatusItem?
     private let popover = NSPopover()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         ClipboardManager.shared.startMonitoring()
+        UNUserNotificationCenter.current().delegate = self
+        CopyToast.requestAuthorizationIfNeeded()
         setupStatusItem()
         setupPopover()
         setupHotKey()
+    }
+
+    /// Without this, macOS suppresses the copy-confirmation banner while
+    /// SyncBoard itself is the frontmost app (which it always is right
+    /// after a copy, since the user just clicked something in its popover).
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner])
     }
 
     private func setupStatusItem() {
