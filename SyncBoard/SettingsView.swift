@@ -132,7 +132,7 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.primaryBackground)
         }
-        .frame(width: 720, height: 640)
+        .frame(minWidth: 720, idealWidth: 720, maxWidth: .infinity, minHeight: 640, idealHeight: 640, maxHeight: .infinity)
         .preferredColorScheme(settings.appearanceTheme.colorScheme)
     }
 

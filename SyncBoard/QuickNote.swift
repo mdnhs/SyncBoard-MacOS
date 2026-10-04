@@ -179,8 +179,14 @@ struct QuickNote: Identifiable, Codable, Equatable, Hashable {
     var customThemeId: String?
     var isPinned: Bool
     var isArchived: Bool
+    /// Manual board position (ascending). Synced separately from content edits
+    /// via `positionUpdatedAt` so reordering doesn't bump the "Updated" date.
+    var sortOrder: Double
+    var positionUpdatedAt: Date
     let createdAt: Date
     var updatedAt: Date
+    /// Tombstone: kept and synced so the Drive merge can't resurrect a deleted note.
+    var deletedAt: Date?
 
     init(
         id: String = ULID.generate(),
@@ -193,8 +199,11 @@ struct QuickNote: Identifiable, Codable, Equatable, Hashable {
         customThemeId: String? = nil,
         isPinned: Bool = false,
         isArchived: Bool = false,
+        sortOrder: Double = 0,
+        positionUpdatedAt: Date = .distantPast,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        deletedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -206,12 +215,15 @@ struct QuickNote: Identifiable, Codable, Equatable, Hashable {
         self.customThemeId = customThemeId
         self.isPinned = isPinned
         self.isArchived = isArchived
+        self.sortOrder = sortOrder
+        self.positionUpdatedAt = positionUpdatedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.deletedAt = deletedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, text, checklistItems, kind, color, theme, customThemeId, isPinned, isArchived, createdAt, updatedAt
+        case id, title, text, checklistItems, kind, color, theme, customThemeId, isPinned, isArchived, sortOrder, positionUpdatedAt, createdAt, updatedAt, deletedAt
     }
 
     // Custom decoding for backward compatibility with notes saved before
@@ -230,6 +242,10 @@ struct QuickNote: Identifiable, Codable, Equatable, Hashable {
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        // Pre-reordering notes keep their newest-first order on every device.
+        sortOrder = try container.decodeIfPresent(Double.self, forKey: .sortOrder) ?? -updatedAt.timeIntervalSince1970
+        positionUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .positionUpdatedAt) ?? .distantPast
+        deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -244,8 +260,11 @@ struct QuickNote: Identifiable, Codable, Equatable, Hashable {
         try container.encode(customThemeId, forKey: .customThemeId)
         try container.encode(isPinned, forKey: .isPinned)
         try container.encode(isArchived, forKey: .isArchived)
+        try container.encode(sortOrder, forKey: .sortOrder)
+        try container.encode(positionUpdatedAt, forKey: .positionUpdatedAt)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encodeIfPresent(deletedAt, forKey: .deletedAt)
     }
 }
 

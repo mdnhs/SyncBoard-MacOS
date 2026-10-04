@@ -331,16 +331,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let hostingController = NSHostingController(rootView: settingsView)
         let newWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 640),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
 
-        newWindow.minSize = NSSize(width: 660, height: 540)
+        newWindow.contentMinSize = NSSize(width: 720, height: 640)
         newWindow.center()
         newWindow.setFrameAutosaveName("SyncBoardSettingsWindow")
-        newWindow.title = "SyncBoard Preferences"
+        newWindow.title = "SyncBoard Settings"
         newWindow.contentViewController = hostingController
         newWindow.isReleasedWhenClosed = false
         newWindow.delegate = self

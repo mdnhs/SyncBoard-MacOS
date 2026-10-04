@@ -181,16 +181,19 @@ final class GoogleDriveSyncManager {
 
             do {
                 let todoService = GoogleDriveTodoService(authManager: auth)
-                let mergedItems = try await todoService.sync(localItems: TodoManager.shared.items)
-                TodoManager.shared.replaceItems(with: mergedItems)
+                let mergedItems = try await todoService.sync(localItems: TodoManager.shared.syncItems)
+                // Re-merge with current local state so tasks created/edited during the upload aren't dropped.
+                let latestItems = GoogleDriveTodoService.merge(local: TodoManager.shared.syncItems, remote: mergedItems)
+                TodoManager.shared.replaceItems(with: latestItems)
             } catch {
                 lastError = error.localizedDescription
             }
 
             do {
                 let notesService = GoogleDriveNotesService(authManager: auth)
-                let mergedNotes = try await notesService.sync(localNotes: QuickNoteManager.shared.notes)
-                QuickNoteManager.shared.replaceNotes(with: mergedNotes)
+                let mergedNotes = try await notesService.sync(localNotes: QuickNoteManager.shared.syncNotes)
+                let latestNotes = GoogleDriveNotesService.merge(local: QuickNoteManager.shared.syncNotes, remote: mergedNotes)
+                QuickNoteManager.shared.replaceNotes(with: latestNotes)
             } catch {
                 lastError = error.localizedDescription
             }

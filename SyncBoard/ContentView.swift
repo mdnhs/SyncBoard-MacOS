@@ -30,6 +30,7 @@ struct ContentView: View {
     @State private var selectedItem: ClipboardItem?
     @State private var selectedTodo: TodoItem?
     @State private var selectedNote: QuickNote?
+    @State private var noteDrag = CardDragModel(coordinateSpace: "quickNotesGrid")
     @State private var selectedNoteTab: QuickNoteFilterTab = .all
     @State private var searchText = ""
     @State private var copiedConfirmation = false
@@ -653,21 +654,16 @@ struct ContentView: View {
 
     private var todoHeader: some View {
         HStack(spacing: 10) {
-            Button {
+            squareAddButton(help: "New Task") {
                 let newTask = todoManager.createItem(title: "New Task")
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                     selectedTodo = newTask
                 }
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(Color.accentColor)
             }
-            .buttonStyle(.plain)
-            .help("New Task")
 
             appSearchBar(placeholder: "Search tasks...")
         }
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .padding(.bottom, 10)
@@ -1113,6 +1109,23 @@ extension ContentView {
                             quickNoteMasonryGrid(unpinnedNotes)
                         }
                     }
+                    .coordinateSpace(.named(noteDrag.coordinateSpace))
+                    .overlay(alignment: .topLeading) {
+                        CardDragOverlay(model: noteDrag) {
+                            if let note = noteDrag.draggingID.flatMap({ id in quickNoteManager.notes.first { $0.id == id } }) {
+                                QuickNoteCard(
+                                    note: note,
+                                    isSelected: false,
+                                    onSelect: {},
+                                    onTogglePin: {},
+                                    onSetColor: { _ in },
+                                    onSetTheme: { _ in },
+                                    onToggleArchive: {},
+                                    onDelete: {}
+                                )
+                            }
+                        }
+                    }
                     .padding(16)
                     .scrollControlSize(.mini)
                 }
@@ -1145,27 +1158,14 @@ extension ContentView {
     private func quickNoteMasonryGrid(_ notes: [QuickNote]) -> some View {
         let contentWidth = max(260, quickNotesGridWidth - 32)
         let columnCount = max(1, min(6, Int((contentWidth + 12) / (240 + 12))))
-        let columns = splitNotesIntoColumns(notes, count: columnCount)
 
-        return HStack(alignment: .top, spacing: 12) {
-            ForEach(0..<columns.count, id: \.self) { colIndex in
-                LazyVStack(spacing: 12) {
-                    ForEach(columns[colIndex]) { note in
-                        quickNoteCardView(note)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .top)
+        // One container for every card keeps view identity across columns,
+        // so reordering slides cards instead of re-inserting them.
+        return MasonryLayout(columns: columnCount, spacing: 12) {
+            ForEach(notes) { note in
+                quickNoteCardView(note)
             }
         }
-    }
-
-    private func splitNotesIntoColumns(_ notes: [QuickNote], count: Int) -> [[QuickNote]] {
-        guard count > 1 else { return [notes] }
-        var result: [[QuickNote]] = Array(repeating: [], count: count)
-        for (index, note) in notes.enumerated() {
-            result[index % count].append(note)
-        }
-        return result
     }
 
     private func quickNoteCardView(_ note: QuickNote) -> some View {
@@ -1173,6 +1173,7 @@ extension ContentView {
             note: note,
             isSelected: selectedNote?.id == note.id,
             onSelect: {
+                guard !noteDrag.suppressesTap else { return }
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                     selectedNote = note
                 }
@@ -1198,27 +1199,65 @@ extension ContentView {
             insertion: .scale(scale: 0.94).combined(with: .opacity),
             removal: .opacity
         ))
+        // The lifted card is drawn by CardDragOverlay; its slot stays as a dashed placeholder.
+        .opacity(noteDrag.draggingID == note.id ? 0 : 1)
+        .background {
+            if noteDrag.draggingID == note.id {
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.primary.opacity(0.18), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+            }
+        }
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named(noteDrag.coordinateSpace))
+        } action: { frame in
+            noteDrag.frames[note.id] = frame
+        }
+        .onDisappear { noteDrag.frames[note.id] = nil }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 5, coordinateSpace: .named(noteDrag.coordinateSpace))
+                .onChanged { value in dragChanged(note, value) }
+                .onEnded { _ in dragEnded() }
+        )
+    }
+
+    private func dragChanged(_ note: QuickNote, _ value: DragGesture.Value) {
+        if noteDrag.draggingID == nil {
+            noteDrag.begin(note.id, startLocation: value.startLocation)
+        }
+        noteDrag.location = value.location
+
+        guard let targetID = noteDrag.swapTarget(at: value.location),
+              quickNoteManager.notes.first(where: { $0.id == targetID })?.isPinned == note.isPinned else { return }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+            quickNoteManager.swap(note.id, with: targetID)
+        }
+    }
+
+    private func dragEnded() {
+        guard noteDrag.draggingID != nil else { return }
+        let didMove = noteDrag.didMove
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            noteDrag.end()
+        }
+        if didMove {
+            quickNoteManager.commitReorder()
+        }
     }
 
     private var quickNotesHeader: some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
-                Button {
+                squareAddButton(help: "New Note") {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                         selectedNote = quickNoteManager.createNote()
                     }
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Color.accentColor)
                 }
-                .buttonStyle(.plain)
-                .help("New Note")
                 .disabled(showArchivedNotes)
                 .opacity(showArchivedNotes ? 0.4 : 1)
 
                 appSearchBar(placeholder: showArchivedNotes ? "Search archived notes..." : "Search notes...")
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             AppPillTabs(
                 selection: $selectedNoteTab,
@@ -1228,6 +1267,26 @@ extension ContentView {
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .padding(.bottom, 10)
+    }
+
+    /// Accent-filled square matching the search bar's height and corner radius;
+    /// the parent row's vertical `fixedSize` supplies that height.
+    private func squareAddButton(help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.accentColor)
+                .frame(width: 38)
+                .frame(maxHeight: .infinity)
+                .overlay(
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private func appSearchBar(placeholder: String) -> some View {
@@ -2615,4 +2674,130 @@ private struct TitlebarSeparatorHider: NSViewRepresentable {
 #Preview {
     ContentView()
         .environment(ClipboardManager.shared)
+}
+
+// MARK: - Card Drag & Drop
+/// In-app, Keep-style card dragging for Quick Notes. A gesture is used instead of
+/// system drag and drop because macOS builds its own drag image, which captured
+/// whole columns.
+@MainActor
+@Observable
+final class CardDragModel {
+    nonisolated let coordinateSpace: String
+
+    private(set) var draggingID: String?
+    var location: CGPoint = .zero
+    private(set) var grabOffset: CGSize = .zero
+    private(set) var cardSize: CGSize = .zero
+
+    // Not observed: written on every layout pass and mouse move.
+    @ObservationIgnored var frames: [String: CGRect] = [:]
+    @ObservationIgnored private(set) var didMove = false
+    @ObservationIgnored private var lastMove = Date.distantPast
+    @ObservationIgnored private var lastDragEnd = Date.distantPast
+
+    nonisolated init(coordinateSpace: String) {
+        self.coordinateSpace = coordinateSpace
+    }
+
+    /// The card's tap fires alongside the drag gesture, so ignore it right after a drag.
+    var suppressesTap: Bool {
+        draggingID != nil || Date().timeIntervalSince(lastDragEnd) < 0.3
+    }
+
+    func begin(_ id: String, startLocation: CGPoint) {
+        let frame = frames[id] ?? .zero
+        grabOffset = CGSize(width: startLocation.x - frame.minX, height: startLocation.y - frame.minY)
+        cardSize = frame.size
+        location = startLocation
+        didMove = false
+        lastMove = .distantPast
+        draggingID = id
+    }
+
+    /// The card under the cursor to swap with, throttled so a card sliding
+    /// under the cursor mid-animation can't bounce straight back.
+    func swapTarget(at point: CGPoint) -> String? {
+        guard let draggingID, Date().timeIntervalSince(lastMove) > 0.2,
+              let target = frames.first(where: { $0.key != draggingID && $0.value.contains(point) })?.key else { return nil }
+        lastMove = Date()
+        didMove = true
+        return target
+    }
+
+    func end() {
+        draggingID = nil
+        lastDragEnd = Date()
+    }
+}
+
+/// Floating copy of the lifted card. The card is built once per drag; only
+/// `FollowCursor` reads `location`, so mouse moves just reposition it.
+private struct CardDragOverlay<Card: View>: View {
+    let model: CardDragModel
+    @ViewBuilder let card: () -> Card
+
+    var body: some View {
+        if model.draggingID != nil {
+            // Pin both dimensions so the floating copy can't grow past the original card.
+            card()
+                .frame(width: model.cardSize.width, height: model.cardSize.height)
+                .scaleEffect(1.03)
+                .shadow(color: .black.opacity(0.22), radius: 18, y: 10)
+                .compositingGroup()
+                .modifier(FollowCursor(model: model))
+                .allowsHitTesting(false)
+                .transition(.opacity)
+        }
+    }
+}
+
+private struct FollowCursor: ViewModifier {
+    let model: CardDragModel
+
+    func body(content: Content) -> some View {
+        content
+            .offset(
+                x: model.location.x - model.grabOffset.width,
+                y: model.location.y - model.grabOffset.height
+            )
+            // Track the cursor 1:1; never inherit the reorder spring.
+            .transaction { $0.animation = nil }
+    }
+}
+
+/// Masonry with a fixed column per position (index % columns), so swapping two
+/// cards never pushes the rest of the board into other columns.
+private struct MasonryLayout: Layout {
+    var columns: Int
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 800
+        let frames = frames(for: subviews, width: width)
+        return CGSize(width: width, height: frames.map(\.maxY).max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (subview, frame) in zip(subviews, frames(for: subviews, width: bounds.width)) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                proposal: ProposedViewSize(width: frame.width, height: frame.height)
+            )
+        }
+    }
+
+    private func frames(for subviews: Subviews, width: CGFloat) -> [CGRect] {
+        let count = max(1, columns)
+        let columnWidth = (width - spacing * CGFloat(count - 1)) / CGFloat(count)
+        var heights = Array(repeating: CGFloat(0), count: count)
+        return subviews.indices.map { index in
+            let subview = subviews[index]
+            let column = index % count
+            let height = subview.sizeThatFits(ProposedViewSize(width: columnWidth, height: nil)).height
+            let frame = CGRect(x: CGFloat(column) * (columnWidth + spacing), y: heights[column], width: columnWidth, height: height)
+            heights[column] += height + spacing
+            return frame
+        }
+    }
 }
