@@ -42,7 +42,10 @@ final class GoogleDriveAuthManager {
     static let shared = GoogleDriveAuthManager()
 
     private(set) var accountEmail: String?
-    var isConnected: Bool { accountEmail != nil }
+    var isConnected: Bool {
+        guard accountEmail != nil else { return false }
+        return KeychainStore.string(forKey: Keys.refreshToken) != nil
+    }
 
     private var accessToken: String?
     private var accessTokenExpiry: Date?
@@ -51,11 +54,18 @@ final class GoogleDriveAuthManager {
 
     private enum Keys {
         static let refreshToken = "refreshToken"
-        static let accountEmail = "accountEmail"
+        static let emailStorageKey = "com.nazmulhsourab.SyncBoard.accountEmail"
     }
 
     private init() {
-        accountEmail = KeychainStore.string(forKey: Keys.accountEmail)
+        let storedEmail = UserDefaults.standard.string(forKey: Keys.emailStorageKey)
+        if let storedEmail, KeychainStore.string(forKey: Keys.refreshToken) != nil {
+            self.accountEmail = storedEmail
+        } else {
+            // Clean up any stale state
+            self.accountEmail = nil
+            UserDefaults.standard.removeObject(forKey: Keys.emailStorageKey)
+        }
     }
 
     func connect() async throws {
@@ -79,13 +89,13 @@ final class GoogleDriveAuthManager {
         accessTokenExpiry = Date().addingTimeInterval(tokens.expiresIn)
 
         let email = try await fetchAccountEmail(accessToken: tokens.accessToken)
-        KeychainStore.set(email, forKey: Keys.accountEmail)
+        UserDefaults.standard.set(email, forKey: Keys.emailStorageKey)
         accountEmail = email
     }
 
     func disconnect() {
         KeychainStore.removeValue(forKey: Keys.refreshToken)
-        KeychainStore.removeValue(forKey: Keys.accountEmail)
+        UserDefaults.standard.removeObject(forKey: Keys.emailStorageKey)
         accessToken = nil
         accessTokenExpiry = nil
         accountEmail = nil
@@ -98,6 +108,8 @@ final class GoogleDriveAuthManager {
             return accessToken
         }
         guard let refreshToken = KeychainStore.string(forKey: Keys.refreshToken) else {
+            // Clean up desynced account email if token was wiped
+            disconnect()
             throw GoogleDriveAuthError.noRefreshToken
         }
         let tokens = try await refreshAccessToken(refreshToken: refreshToken)

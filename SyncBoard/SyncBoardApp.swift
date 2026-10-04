@@ -14,5 +14,13 @@ struct SyncBoardApp: App {
             ContentView()
                 .environment(ClipboardManager.shared)
         }
+
+        #if os(macOS)
+        Settings {
+            SettingsView()
+                .environment(ClipboardManager.shared)
+        }
+        .windowResizability(.contentMinSize)
+        #endif
     }
 }

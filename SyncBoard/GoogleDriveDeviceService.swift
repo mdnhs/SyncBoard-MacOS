@@ -1,13 +1,17 @@
 //
-//  GoogleDriveSyncService.swift
+//  GoogleDriveDeviceService.swift
 //  SyncBoard
 //
 
 import Foundation
 
-actor GoogleDriveSyncService {
+/// Persists the shared "which devices are signed in" registry as a second
+/// JSON file in the account's `appDataFolder`, alongside the clipboard
+/// history file. Mirrors `GoogleDriveSyncService`'s Drive plumbing since both
+/// need the same find-or-create/download/upload flow against a single file.
+actor GoogleDriveDeviceService {
     private let authManager: GoogleDriveAuthManager
-    private let syncFileName = "syncboard_history.json"
+    private let fileName = "syncboard_devices.json"
     private var cachedFileID: String?
 
     init(authManager: GoogleDriveAuthManager = .shared) {
@@ -16,27 +20,66 @@ actor GoogleDriveSyncService {
 
     // MARK: - Public API
 
-    func fetchRemoteHistory() async throws -> [ClipboardItem] {
+    func fetchDevices() async throws -> [DeviceSession] {
         guard let fileID = try await findFileID() else { return [] }
-        return try await downloadHistory(fileID: fileID)
+        return try await downloadDevices(fileID: fileID)
     }
 
-    func sync(localHistory: [ClipboardItem]) async throws -> [ClipboardItem] {
+    /// Adds or refreshes this device's entry and uploads the merged list.
+    /// If the registry already has entries and this device isn't one of
+    /// them, another device explicitly signed it out — leave it absent
+    /// rather than silently re-adding it.
+    func heartbeatCurrentDevice() async throws -> [DeviceSession] {
         let fileID = try await findOrCreateFileID()
-        let remoteHistory = try await downloadHistory(fileID: fileID)
-        let merged = Self.merge(local: localHistory, remote: remoteHistory)
-        try await uploadHistory(merged, fileID: fileID)
-        return merged
+        let devices = try await downloadDevices(fileID: fileID)
+        let isStillRegistered = devices.contains { $0.id == DeviceIdentity.currentID }
+        guard isStillRegistered || devices.isEmpty else {
+            return devices
+        }
+        return try await upsertCurrentDevice(into: devices, fileID: fileID)
     }
 
-    static func merge(local: [ClipboardItem], remote: [ClipboardItem]) -> [ClipboardItem] {
-        var byID: [String: ClipboardItem] = [:]
-        for item in remote { byID[item.id] = item }
-        for item in local { byID[item.id] = item }
-        return byID.values.sorted { $0.date > $1.date }
+    /// Unconditionally (re)registers this device, used right after connecting.
+    func registerCurrentDevice() async throws -> [DeviceSession] {
+        let fileID = try await findOrCreateFileID()
+        let devices = try await downloadDevices(fileID: fileID)
+        return try await upsertCurrentDevice(into: devices, fileID: fileID)
     }
 
-    // MARK: - Drive API
+    func removeDevice(id: String) async throws -> [DeviceSession] {
+        let fileID = try await findOrCreateFileID()
+        var devices = try await downloadDevices(fileID: fileID)
+        devices.removeAll { $0.id == id }
+        try await uploadDevices(devices, fileID: fileID)
+        return devices
+    }
+
+    // MARK: - Helpers
+
+    private func upsertCurrentDevice(into devices: [DeviceSession], fileID: String) async throws -> [DeviceSession] {
+        var updated = devices
+        let now = Date()
+        if let index = updated.firstIndex(where: { $0.id == DeviceIdentity.currentID }) {
+            updated[index].name = DeviceIdentity.currentName
+            updated[index].osVersion = DeviceIdentity.osVersion
+            updated[index].lastSeenAt = now
+        } else {
+            updated.append(
+                DeviceSession(
+                    id: DeviceIdentity.currentID,
+                    name: DeviceIdentity.currentName,
+                    osName: DeviceIdentity.osName,
+                    osVersion: DeviceIdentity.osVersion,
+                    loginDate: now,
+                    lastSeenAt: now
+                )
+            )
+        }
+        try await uploadDevices(updated, fileID: fileID)
+        return updated
+    }
+
+    // MARK: - Drive API (find/create/download/upload a single JSON file)
 
     private func findOrCreateFileID() async throws -> String {
         if let existing = try await findFileID() {
@@ -49,7 +92,7 @@ actor GoogleDriveSyncService {
         var components = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
         components.queryItems = [
             URLQueryItem(name: "spaces", value: "appDataFolder"),
-            URLQueryItem(name: "q", value: "name = '\(syncFileName)' and trashed = false"),
+            URLQueryItem(name: "q", value: "name = '\(fileName)' and trashed = false"),
             URLQueryItem(name: "fields", value: "files(id, name)"),
         ]
         var request = URLRequest(url: components.url!)
@@ -68,7 +111,7 @@ actor GoogleDriveSyncService {
         request.setValue("multipart/related; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         let metadataJSON = """
-        {"name": "\(syncFileName)", "parents": ["appDataFolder"]}
+        {"name": "\(fileName)", "parents": ["appDataFolder"]}
         """
         var body = Data()
         body.append("--\(boundary)\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n\(metadataJSON)\r\n".data(using: .utf8)!)
@@ -82,21 +125,21 @@ actor GoogleDriveSyncService {
         return file.id
     }
 
-    private func downloadHistory(fileID: String) async throws -> [ClipboardItem] {
+    private func downloadDevices(fileID: String) async throws -> [DeviceSession] {
         let url = URL(string: "https://www.googleapis.com/drive/v3/files/\(fileID)?alt=media")!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         let data = try await performAuthorizedRequest(request)
         guard !data.isEmpty else { return [] }
-        return try JSONDecoder().decode([ClipboardItem].self, from: data)
+        return try JSONDecoder().decode([DeviceSession].self, from: data)
     }
 
-    private func uploadHistory(_ items: [ClipboardItem], fileID: String) async throws {
+    private func uploadDevices(_ devices: [DeviceSession], fileID: String) async throws {
         let url = URL(string: "https://www.googleapis.com/upload/drive/v3/files/\(fileID)?uploadType=media")!
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(items)
+        request.httpBody = try JSONEncoder().encode(devices)
         _ = try await performAuthorizedRequest(request)
     }
 
@@ -115,7 +158,7 @@ actor GoogleDriveSyncService {
     }
 }
 
-// MARK: - Models & Errors
+// MARK: - Models
 
 private struct DriveFileListResponse: Codable {
     let files: [DriveFile]
@@ -124,18 +167,4 @@ private struct DriveFileListResponse: Codable {
 private struct DriveFile: Codable {
     let id: String
     let name: String
-}
-
-enum SyncError: LocalizedError {
-    case invalidResponse
-    case httpError(statusCode: Int)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidResponse:
-            return "Invalid response received from Google Drive."
-        case .httpError(let statusCode):
-            return "Google Drive API error (HTTP \(statusCode))."
-        }
-    }
 }

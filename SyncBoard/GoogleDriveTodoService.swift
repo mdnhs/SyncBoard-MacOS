@@ -1,13 +1,16 @@
 //
-//  GoogleDriveSyncService.swift
+//  GoogleDriveTodoService.swift
 //  SyncBoard
 //
 
 import Foundation
 
-actor GoogleDriveSyncService {
+/// Persists the To Do Kanban board as a third JSON file in the account's
+/// `appDataFolder`, alongside the clipboard history and device registry
+/// files. Mirrors `GoogleDriveSyncService`'s Drive plumbing.
+actor GoogleDriveTodoService {
     private let authManager: GoogleDriveAuthManager
-    private let syncFileName = "syncboard_history.json"
+    private let fileName = "syncboard_todos.json"
     private var cachedFileID: String?
 
     init(authManager: GoogleDriveAuthManager = .shared) {
@@ -16,27 +19,36 @@ actor GoogleDriveSyncService {
 
     // MARK: - Public API
 
-    func fetchRemoteHistory() async throws -> [ClipboardItem] {
+    func fetchItems() async throws -> [TodoItem] {
         guard let fileID = try await findFileID() else { return [] }
-        return try await downloadHistory(fileID: fileID)
+        return try await downloadItems(fileID: fileID)
     }
 
-    func sync(localHistory: [ClipboardItem]) async throws -> [ClipboardItem] {
+    func sync(localItems: [TodoItem]) async throws -> [TodoItem] {
         let fileID = try await findOrCreateFileID()
-        let remoteHistory = try await downloadHistory(fileID: fileID)
-        let merged = Self.merge(local: localHistory, remote: remoteHistory)
-        try await uploadHistory(merged, fileID: fileID)
+        let remoteItems = try await downloadItems(fileID: fileID)
+        let merged = Self.merge(local: localItems, remote: remoteItems)
+        try await uploadItems(merged, fileID: fileID)
         return merged
     }
 
-    static func merge(local: [ClipboardItem], remote: [ClipboardItem]) -> [ClipboardItem] {
-        var byID: [String: ClipboardItem] = [:]
+    /// Tasks are edited and moved between columns in place (unlike clipboard
+    /// entries, which are only appended or deleted), so the merge keeps
+    /// whichever copy of each task was updated most recently instead of
+    /// always preferring the local one.
+    static func merge(local: [TodoItem], remote: [TodoItem]) -> [TodoItem] {
+        var byID: [String: TodoItem] = [:]
         for item in remote { byID[item.id] = item }
-        for item in local { byID[item.id] = item }
-        return byID.values.sorted { $0.date > $1.date }
+        for item in local {
+            if let existing = byID[item.id], existing.updatedAt > item.updatedAt {
+                continue
+            }
+            byID[item.id] = item
+        }
+        return byID.values.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    // MARK: - Drive API
+    // MARK: - Drive API (find/create/download/upload a single JSON file)
 
     private func findOrCreateFileID() async throws -> String {
         if let existing = try await findFileID() {
@@ -49,7 +61,7 @@ actor GoogleDriveSyncService {
         var components = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
         components.queryItems = [
             URLQueryItem(name: "spaces", value: "appDataFolder"),
-            URLQueryItem(name: "q", value: "name = '\(syncFileName)' and trashed = false"),
+            URLQueryItem(name: "q", value: "name = '\(fileName)' and trashed = false"),
             URLQueryItem(name: "fields", value: "files(id, name)"),
         ]
         var request = URLRequest(url: components.url!)
@@ -68,7 +80,7 @@ actor GoogleDriveSyncService {
         request.setValue("multipart/related; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         let metadataJSON = """
-        {"name": "\(syncFileName)", "parents": ["appDataFolder"]}
+        {"name": "\(fileName)", "parents": ["appDataFolder"]}
         """
         var body = Data()
         body.append("--\(boundary)\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n\(metadataJSON)\r\n".data(using: .utf8)!)
@@ -82,16 +94,16 @@ actor GoogleDriveSyncService {
         return file.id
     }
 
-    private func downloadHistory(fileID: String) async throws -> [ClipboardItem] {
+    private func downloadItems(fileID: String) async throws -> [TodoItem] {
         let url = URL(string: "https://www.googleapis.com/drive/v3/files/\(fileID)?alt=media")!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         let data = try await performAuthorizedRequest(request)
         guard !data.isEmpty else { return [] }
-        return try JSONDecoder().decode([ClipboardItem].self, from: data)
+        return try JSONDecoder().decode([TodoItem].self, from: data)
     }
 
-    private func uploadHistory(_ items: [ClipboardItem], fileID: String) async throws {
+    private func uploadItems(_ items: [TodoItem], fileID: String) async throws {
         let url = URL(string: "https://www.googleapis.com/upload/drive/v3/files/\(fileID)?uploadType=media")!
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
@@ -115,7 +127,7 @@ actor GoogleDriveSyncService {
     }
 }
 
-// MARK: - Models & Errors
+// MARK: - Models
 
 private struct DriveFileListResponse: Codable {
     let files: [DriveFile]
@@ -124,18 +136,4 @@ private struct DriveFileListResponse: Codable {
 private struct DriveFile: Codable {
     let id: String
     let name: String
-}
-
-enum SyncError: LocalizedError {
-    case invalidResponse
-    case httpError(statusCode: Int)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidResponse:
-            return "Invalid response received from Google Drive."
-        case .httpError(let statusCode):
-            return "Google Drive API error (HTTP \(statusCode))."
-        }
-    }
 }

@@ -85,7 +85,25 @@ struct MenuBarPopoverView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            googleDriveButton
+
+            HStack(spacing: 8) {
+                googleDriveButton
+
+                Button {
+                    AppSettings.openSettingsWindow()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.primary.opacity(0.06))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Open Settings (⌘,)")
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 12)
@@ -184,34 +202,14 @@ struct MenuBarPopoverView: View {
     }
 
     private var filterTabs: some View {
-        HStack(spacing: 2) {
-            filterTabButton(title: "All", isSelected: selectedTab == nil) {
-                selectedTab = nil
-            }
-            ForEach(ClipboardContentKind.allCases) { kind in
-                filterTabButton(title: kind.rawValue, isSelected: selectedTab == kind) {
-                    selectedTab = kind
-                }
-            }
-        }
-        .padding(3)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        let items: [ClipboardContentKind?] = [nil] + ClipboardContentKind.allCases.map { Optional($0) }
+        return AppPillTabs(
+            selection: $selectedTab,
+            items: items,
+            title: { $0?.rawValue ?? "All" }
+        )
         .padding(.horizontal, 12)
         .padding(.bottom, 12)
-    }
-
-    private func filterTabButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.callout)
-                .fontWeight(isSelected ? .semibold : .regular)
-                .foregroundStyle(isSelected ? .primary : .secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(isSelected ? AnyShapeStyle(.background) : AnyShapeStyle(.clear),
-                            in: RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
     }
 
     private var emptyState: some View {
@@ -227,17 +225,23 @@ struct MenuBarPopoverView: View {
 
     private var list: some View {
         ScrollView {
-            // Not pinning section headers: on macOS, LazyVStack header pinning across
-            // several date sections was causing the scroll offset to hitch at each
-            // section boundary and then snap once it ran out of sections to re-pin.
             LazyVStack(spacing: 12) {
                 ForEach(groupedHistory, id: \.section) { group in
                     Section {
                         ForEach(group.items) { item in
-                            PopoverRow(item: item) {
-                                clipboardManager.copyToPasteboard(item)
-                                dismissPopover()
-                            }
+                            PopoverRow(
+                                item: item,
+                                onCopy: {
+                                    clipboardManager.copyToPasteboard(item)
+                                    dismissPopover()
+                                },
+                                onTogglePin: {
+                                    clipboardManager.togglePin(for: item)
+                                },
+                                onDelete: {
+                                    clipboardManager.delete(item)
+                                }
+                            )
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.94).combined(with: .opacity).combined(with: .offset(y: -12)),
                                 removal: .opacity
@@ -292,6 +296,8 @@ struct MenuBarPopoverView: View {
 private struct PopoverRow: View {
     let item: ClipboardItem
     let onCopy: () -> Void
+    let onTogglePin: () -> Void
+    let onDelete: () -> Void
     @State private var isHovering = false
     @State private var isButtonHovering = false
 
@@ -301,6 +307,43 @@ private struct PopoverRow: View {
                 .contentShape(RoundedRectangle(cornerRadius: 14))
                 .onTapGesture(perform: onCopy)
                 .onHover { isHovering = $0 }
+                .contextMenu {
+                    Button(action: onCopy) {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+
+                    Button(action: onTogglePin) {
+                        Label(item.isPinned ? "Unpin Item" : "Pin Item", systemImage: item.isPinned ? "pin.slash" : "pin.fill")
+                    }
+
+                    if let colorInfo = item.detectedColor {
+                        Menu("Copy Color Format") {
+                            Button("HEX (\(colorInfo.hexString))") { ClipboardManager.shared.copyRawText(colorInfo.hexString) }
+                            Button("RGB (\(colorInfo.rgbString))") { ClipboardManager.shared.copyRawText(colorInfo.rgbString) }
+                            Button("HSL (\(colorInfo.hslString))") { ClipboardManager.shared.copyRawText(colorInfo.hslString) }
+                            Button("SwiftUI Color") { ClipboardManager.shared.copyRawText(colorInfo.swiftUIString) }
+                            Button("NSColor") { ClipboardManager.shared.copyRawText(colorInfo.nsColorCodeString) }
+                        }
+                    }
+
+                    Menu("Transform & Copy") {
+                        ForEach(TextTransformer.Action.allCases) { action in
+                            Button {
+                                if let res = TextTransformer.transform(item.text, using: action) {
+                                    ClipboardManager.shared.copyRawText(res)
+                                }
+                            } label: {
+                                Label(action.rawValue, systemImage: action.iconName)
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
 
             NavigationLink(value: item) {
                 detailButton
@@ -360,21 +403,47 @@ private struct PopoverRow: View {
 
     private var card: some View {
         HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(item.contentKind.color)
-                    .frame(width: 40, height: 40)
-                Image(systemName: item.contentKind.iconName)
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(.white)
+            if let colorInfo = item.detectedColor {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(colorInfo.color)
+                        .frame(width: 40, height: 40)
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(Color.white.opacity(0.3), lineWidth: 1)
+                        .frame(width: 40, height: 40)
+                }
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(item.contentKind.color)
+                        .frame(width: 40, height: 40)
+                    Image(systemName: item.contentKind.iconName)
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.white)
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Text("Copied from Mac")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
+                    if item.isPinned {
+                        Label("Pinned", systemImage: "pin.fill")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color.orange)
+                            .fixedSize()
+                    } else if let colorInfo = item.detectedColor {
+                        Text(colorInfo.hexString)
+                            .font(.caption.monospaced())
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color.pink)
+                    } else {
+                        Text("Copied from Mac")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+
                     Spacer()
+
                     Text(item.date.formatted(date: .abbreviated, time: .omitted))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -384,14 +453,16 @@ private struct PopoverRow: View {
                         .frame(width: 26, height: 16)
                 }
 
-                // Collapsed to one flowing line rather than truncated at the
-                // first embedded newline, so multi-line content (like a code
-                // snippet with a comment above it) still reads as one preview.
-                Text(item.text.replacingOccurrences(of: "\n", with: " "))
-                    .font(item.contentKind == .code ? .callout.monospaced() : .callout)
-                    .foregroundStyle(item.contentKind == .code ? item.contentKind.color : Color.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                SensitiveTextReveal(
+                    text: item.text.replacingOccurrences(of: "\n", with: " "),
+                    isSensitive: item.isSensitive
+                ) { displayText in
+                    Text(displayText)
+                        .font(item.contentKind == .code ? .callout.monospaced() : .callout)
+                        .foregroundStyle(item.contentKind == .code ? item.contentKind.color : Color.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
 
                 HStack(spacing: 8) {
                     Text("\(item.text.count) chars")
@@ -400,6 +471,7 @@ private struct PopoverRow: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
                         .background(Color.primary.opacity(0.06), in: Capsule())
+
                     Text(item.contentKind.displayLabel)
                         .font(.caption)
                         .foregroundStyle(item.contentKind.color)
@@ -409,6 +481,10 @@ private struct PopoverRow: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.background, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(item.isPinned ? Color.orange.opacity(0.4) : Color.primary.opacity(0.05), lineWidth: 1)
+        )
         .shadow(color: .black.opacity(isHovering ? 0.08 : 0), radius: 8, y: 2)
     }
 }

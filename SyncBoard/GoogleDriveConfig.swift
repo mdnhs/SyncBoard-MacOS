@@ -20,7 +20,7 @@ import Foundation
 /// credential instead (Google issues a secret for that type). Leave it
 /// empty for an "iOS" credential.
 enum GoogleDriveConfig {
-    static let clientID = "YOUR_CLIENT_ID.apps.googleusercontent.com"
+    static let clientID = "701509478576-hfbaac8uc9p9lcur4140son0jq9nu558.apps.googleusercontent.com"
     static let clientSecret = ""
 
     /// `drive.appdata` keeps the synced file in a hidden, app-only area of

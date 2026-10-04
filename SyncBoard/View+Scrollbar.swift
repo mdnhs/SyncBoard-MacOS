@@ -48,7 +48,25 @@ private struct ScrollControlSizeModifier: NSViewRepresentable {
             if let sv = v as? NSScrollView {
                 return sv
             }
+            if let direct = v.enclosingScrollView {
+                return direct
+            }
             current = v.superview
+        }
+        if let sv = findScrollViewInSubviews(view) {
+            return sv
+        }
+        return nil
+    }
+
+    private func findScrollViewInSubviews(_ view: NSView) -> NSScrollView? {
+        if let sv = view as? NSScrollView {
+            return sv
+        }
+        for sub in view.subviews {
+            if let found = findScrollViewInSubviews(sub) {
+                return found
+            }
         }
         return nil
     }

@@ -18,7 +18,14 @@ final class HotKeyManager {
 
     private init() {}
 
+    func applyCurrentPreset() {
+        let preset = AppSettings.shared.hotKeyPreset
+        register(keyCode: preset.keyCode, modifiers: preset.modifiers)
+    }
+
     func register(keyCode: UInt32, modifiers: UInt32) {
+        unregister()
+
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: OSType(kEventHotKeyPressed))
 
         InstallEventHandler(GetApplicationEventTarget(), { _, _, userData in

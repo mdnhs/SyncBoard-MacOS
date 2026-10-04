@@ -1,13 +1,16 @@
 //
-//  GoogleDriveSyncService.swift
+//  GoogleDriveNotesService.swift
 //  SyncBoard
 //
 
 import Foundation
 
-actor GoogleDriveSyncService {
+/// Persists Quick Notes as a JSON file in the account's `appDataFolder`,
+/// alongside the clipboard history, device registry, and To Do files.
+/// Mirrors `GoogleDriveSyncService`'s Drive plumbing.
+actor GoogleDriveNotesService {
     private let authManager: GoogleDriveAuthManager
-    private let syncFileName = "syncboard_history.json"
+    private let fileName = "syncboard_notes.json"
     private var cachedFileID: String?
 
     init(authManager: GoogleDriveAuthManager = .shared) {
@@ -16,27 +19,35 @@ actor GoogleDriveSyncService {
 
     // MARK: - Public API
 
-    func fetchRemoteHistory() async throws -> [ClipboardItem] {
+    func fetchNotes() async throws -> [QuickNote] {
         guard let fileID = try await findFileID() else { return [] }
-        return try await downloadHistory(fileID: fileID)
+        return try await downloadNotes(fileID: fileID)
     }
 
-    func sync(localHistory: [ClipboardItem]) async throws -> [ClipboardItem] {
+    func sync(localNotes: [QuickNote]) async throws -> [QuickNote] {
         let fileID = try await findOrCreateFileID()
-        let remoteHistory = try await downloadHistory(fileID: fileID)
-        let merged = Self.merge(local: localHistory, remote: remoteHistory)
-        try await uploadHistory(merged, fileID: fileID)
+        let remoteNotes = try await downloadNotes(fileID: fileID)
+        let merged = Self.merge(local: localNotes, remote: remoteNotes)
+        try await uploadNotes(merged, fileID: fileID)
         return merged
     }
 
-    static func merge(local: [ClipboardItem], remote: [ClipboardItem]) -> [ClipboardItem] {
-        var byID: [String: ClipboardItem] = [:]
-        for item in remote { byID[item.id] = item }
-        for item in local { byID[item.id] = item }
-        return byID.values.sorted { $0.date > $1.date }
+    /// Notes are edited in place (unlike clipboard entries, which are only
+    /// appended or deleted), so the merge keeps whichever copy of each note
+    /// was updated most recently instead of always preferring the local one.
+    static func merge(local: [QuickNote], remote: [QuickNote]) -> [QuickNote] {
+        var byID: [String: QuickNote] = [:]
+        for note in remote { byID[note.id] = note }
+        for note in local {
+            if let existing = byID[note.id], existing.updatedAt > note.updatedAt {
+                continue
+            }
+            byID[note.id] = note
+        }
+        return byID.values.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    // MARK: - Drive API
+    // MARK: - Drive API (find/create/download/upload a single JSON file)
 
     private func findOrCreateFileID() async throws -> String {
         if let existing = try await findFileID() {
@@ -49,7 +60,7 @@ actor GoogleDriveSyncService {
         var components = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
         components.queryItems = [
             URLQueryItem(name: "spaces", value: "appDataFolder"),
-            URLQueryItem(name: "q", value: "name = '\(syncFileName)' and trashed = false"),
+            URLQueryItem(name: "q", value: "name = '\(fileName)' and trashed = false"),
             URLQueryItem(name: "fields", value: "files(id, name)"),
         ]
         var request = URLRequest(url: components.url!)
@@ -68,7 +79,7 @@ actor GoogleDriveSyncService {
         request.setValue("multipart/related; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         let metadataJSON = """
-        {"name": "\(syncFileName)", "parents": ["appDataFolder"]}
+        {"name": "\(fileName)", "parents": ["appDataFolder"]}
         """
         var body = Data()
         body.append("--\(boundary)\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n\(metadataJSON)\r\n".data(using: .utf8)!)
@@ -82,21 +93,21 @@ actor GoogleDriveSyncService {
         return file.id
     }
 
-    private func downloadHistory(fileID: String) async throws -> [ClipboardItem] {
+    private func downloadNotes(fileID: String) async throws -> [QuickNote] {
         let url = URL(string: "https://www.googleapis.com/drive/v3/files/\(fileID)?alt=media")!
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         let data = try await performAuthorizedRequest(request)
         guard !data.isEmpty else { return [] }
-        return try JSONDecoder().decode([ClipboardItem].self, from: data)
+        return try JSONDecoder().decode([QuickNote].self, from: data)
     }
 
-    private func uploadHistory(_ items: [ClipboardItem], fileID: String) async throws {
+    private func uploadNotes(_ notes: [QuickNote], fileID: String) async throws {
         let url = URL(string: "https://www.googleapis.com/upload/drive/v3/files/\(fileID)?uploadType=media")!
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(items)
+        request.httpBody = try JSONEncoder().encode(notes)
         _ = try await performAuthorizedRequest(request)
     }
 
@@ -115,7 +126,7 @@ actor GoogleDriveSyncService {
     }
 }
 
-// MARK: - Models & Errors
+// MARK: - Models
 
 private struct DriveFileListResponse: Codable {
     let files: [DriveFile]
@@ -124,18 +135,4 @@ private struct DriveFileListResponse: Codable {
 private struct DriveFile: Codable {
     let id: String
     let name: String
-}
-
-enum SyncError: LocalizedError {
-    case invalidResponse
-    case httpError(statusCode: Int)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidResponse:
-            return "Invalid response received from Google Drive."
-        case .httpError(let statusCode):
-            return "Google Drive API error (HTTP \(statusCode))."
-        }
-    }
 }

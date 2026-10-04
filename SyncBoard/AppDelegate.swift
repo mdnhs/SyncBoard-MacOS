@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     private let popover = NSPopover()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppSettings.shared.applyTheme()
         ClipboardManager.shared.startMonitoring()
         UNUserNotificationCenter.current().delegate = self
         CopyToast.requestAuthorizationIfNeeded()
@@ -23,6 +24,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         setupStatusItem()
         setupPopover()
         setupHotKey()
+
+        AppSettings.shared.onThemeChange = { [weak self] _ in
+            self?.updatePopoverAppearance()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if AppSettings.shared.clearHistoryOnQuit {
+            ClipboardManager.shared.clearAll()
+        }
     }
 
     /// Without this, macOS suppresses the copy-confirmation banner while
@@ -52,6 +63,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     private func setupPopover() {
         popover.delegate = self
         popover.behavior = .transient
+        updatePopoverAppearance()
+
         let hostingController = NSHostingController(
             rootView: MenuBarPopoverView()
                 .environment(ClipboardManager.shared)
@@ -67,6 +80,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         popover.contentViewController = hostingController
     }
 
+    private func updatePopoverAppearance() {
+        let appearance = AppSettings.shared.appearanceTheme.nsAppearance
+        popover.appearance = appearance
+        popover.contentViewController?.view.appearance = appearance
+        if let window = popover.contentViewController?.view.window {
+            window.appearance = appearance
+        }
+    }
+
     /// Sizes the popover to 72% of the status item's current screen height,
     /// re-derived on every open since it can move between displays.
     private func updatePopoverSize(for button: NSStatusBarButton) {
@@ -78,8 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         HotKeyManager.shared.onHotKeyPressed = { [weak self] in
             self?.togglePopover()
         }
-        // Cmd+Shift+V, the de-facto standard shortcut for clipboard managers.
-        HotKeyManager.shared.register(keyCode: UInt32(kVK_ANSI_V), modifiers: UInt32(cmdKey | shiftKey))
+        HotKeyManager.shared.applyCurrentPreset()
     }
 
     @objc private func togglePopover() {
@@ -89,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             popover.performClose(nil)
         } else {
             updatePopoverSize(for: button)
+            updatePopoverAppearance()
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             configurePopoverWindow()
@@ -100,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     }
 
     private func configurePopoverWindow() {
+        updatePopoverAppearance()
         if let window = popover.contentViewController?.view.window {
             window.allowsToolTipsWhenApplicationIsInactive = true
             window.makeKey()

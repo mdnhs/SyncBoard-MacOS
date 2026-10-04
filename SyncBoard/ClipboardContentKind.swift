@@ -9,6 +9,7 @@ enum ClipboardContentKind: String, CaseIterable, Identifiable {
     case text = "Text"
     case link = "Links"
     case code = "Code"
+    case color = "Colors"
 
     var id: String { rawValue }
 
@@ -17,6 +18,7 @@ enum ClipboardContentKind: String, CaseIterable, Identifiable {
         case .text: return "Text snippet"
         case .link: return "Link preview"
         case .code: return "Code snippet"
+        case .color: return "Color preview"
         }
     }
 
@@ -25,6 +27,7 @@ enum ClipboardContentKind: String, CaseIterable, Identifiable {
         case .text: return "doc.plaintext.fill"
         case .link: return "link"
         case .code: return "chevron.left.forwardslash.chevron.right"
+        case .color: return "paintpalette.fill"
         }
     }
 
@@ -33,11 +36,16 @@ enum ClipboardContentKind: String, CaseIterable, Identifiable {
         case .text: return .blue
         case .link: return .green
         case .code: return .orange
+        case .color: return .pink
         }
     }
 
     static func detect(from text: String) -> ClipboardContentKind {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if ColorDetector.detect(from: trimmed) != nil {
+            return .color
+        }
 
         if trimmed.range(of: #"^(https?://|www\.)\S+$"#, options: [.regularExpression, .caseInsensitive]) != nil {
             return .link
@@ -60,9 +68,11 @@ extension ClipboardItem {
         ClipboardContentKind.detect(from: text)
     }
 
-    /// Splits mixed content (e.g. an explanation followed by a JSON block)
-    /// into runs of plain-prose lines and runs of code-like lines, so only
-    /// the actual code gets a code-block treatment when displayed.
+    var detectedColor: DetectedColor? {
+        ColorDetector.detect(from: text)
+    }
+
+    /// Splits mixed content into runs of plain-prose lines and runs of code-like lines.
     var textSegments: [ClipboardTextSegment] {
         let lines = text.components(separatedBy: "\n")
         var result: [ClipboardTextSegment] = []
@@ -71,9 +81,6 @@ extension ClipboardItem {
 
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            // A blank line carries no signal on its own (code and prose both
-            // have blank lines); keep it attached to whatever segment it's
-            // already inside instead of forcing a prose classification.
             let isCode = trimmed.isEmpty ? (currentIsCode ?? false) : Self.lineLooksLikeCode(line)
             if currentIsCode == nil || currentIsCode == isCode {
                 currentLines.append(line)
@@ -93,8 +100,6 @@ extension ClipboardItem {
     private static func lineLooksLikeCode(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty { return false }
-        // Comment lines (// # /* *) are part of the surrounding code, not
-        // prose — without this, a commented line splits the snippet in two.
         if ["//", "#", "/*", "*", "--"].contains(where: trimmed.hasPrefix) { return true }
         if ["{", "}", "[", "]"].contains(where: trimmed.hasPrefix) { return true }
         if [";", "{", "(", ","].contains(where: trimmed.hasSuffix) { return true }

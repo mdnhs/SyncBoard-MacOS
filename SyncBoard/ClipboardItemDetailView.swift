@@ -78,10 +78,14 @@ struct ClipboardItemDetailView: View {
             Button {
                 dismiss()
             } label: {
-                Label("Back", systemImage: "chevron.left")
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 28, height: 28)
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.tint)
+            .help("Back")
 
             Spacer()
 
@@ -95,9 +99,13 @@ struct ClipboardItemDetailView: View {
                 dismiss()
             } label: {
                 Image(systemName: "trash")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 28, height: 28)
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.red)
+            .help("Delete item")
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
