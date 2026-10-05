@@ -30,6 +30,9 @@ struct ContentView: View {
     @State private var selectedItem: ClipboardItem?
     @State private var selectedTodo: TodoItem?
     @State private var selectedNote: QuickNote?
+    @State private var historyNote: QuickNote?
+    /// Bumped after a restore from a card so an open editor drops its stale local copy.
+    @State private var noteEditorRevision = 0
     @State private var noteDrag = CardDragModel(coordinateSpace: "quickNotesGrid")
     @State private var selectedNoteTab: QuickNoteFilterTab = .all
     @State private var searchText = ""
@@ -204,6 +207,14 @@ struct ContentView: View {
                 quickNoteDrawer(note)
             }
         }
+        .sheet(item: $historyNote) { note in
+            let liveNote = quickNoteManager.notes.first(where: { $0.id == note.id }) ?? note
+            NoteHistoryView(note: liveNote) { revision in
+                quickNoteManager.restore(liveNote, to: revision)
+                noteEditorRevision += 1
+                historyNote = nil
+            }
+        }
     }
 
     // MARK: - To Do: Drawer Overlay
@@ -290,6 +301,7 @@ struct ContentView: View {
                     }
                 }
             )
+            .id("\(liveNote.id)-\(noteEditorRevision)")
             .frame(width: 420)
             .clipped()
             .transition(.move(edge: .trailing))
@@ -802,8 +814,11 @@ private struct TodoCard: View {
                 Text(item.updatedAt.formatted(date: .abbreviated, time: .omitted))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .fixedSize()
 
-                Spacer()
+                DeviceOriginLabel(origin: item.origin)
+
+                Spacer(minLength: 0)
 
                 HStack(spacing: 4) {
                     // Background Color/Art Palette picker button
@@ -1055,6 +1070,7 @@ private struct TodoEditorView: View {
             Text("Created \(item.createdAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            DeviceOriginLabel(origin: item.origin, prefix: "on")
             Spacer()
             Text("Syncs automatically with Google Drive")
                 .font(.caption2)
@@ -1193,7 +1209,8 @@ extension ContentView {
                     if selectedNote?.id == note.id { selectedNote = nil }
                     quickNoteManager.delete(note)
                 }
-            }
+            },
+            onShowHistory: { historyNote = note }
         )
         .transition(.asymmetric(
             insertion: .scale(scale: 0.94).combined(with: .opacity),
@@ -1369,6 +1386,7 @@ private struct QuickNoteCard: View {
     var onSetCustomTheme: ((String?) -> Void)? = nil
     let onToggleArchive: () -> Void
     let onDelete: () -> Void
+    var onShowHistory: (() -> Void)? = nil
     @State private var isHovering = false
     @State private var showBackgroundPicker = false
 
@@ -1399,11 +1417,16 @@ private struct QuickNoteCard: View {
                 textPreview
             }
 
-            Text(note.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.top, 2)
+            HStack(spacing: 6) {
+                Text(note.updatedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+
+                DeviceOriginLabel(origin: note.origin)
+            }
+            .padding(.top, 2)
 
             // Dedicated separate tools row
             HStack(spacing: 6) {
@@ -1418,6 +1441,17 @@ private struct QuickNoteCard: View {
                 .help(note.isPinned ? "Unpin note" : "Pin note")
 
                 colorMenu
+
+                if let onShowHistory {
+                    Button(action: onShowHistory) {
+                        Image(systemName: "clock")
+                            .font(.caption2)
+                            .padding(5)
+                            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .help("History")
+                }
 
                 Button(action: onToggleArchive) {
                     Image(systemName: note.isArchived ? "arrow.uturn.backward" : "archivebox")
@@ -1617,6 +1651,7 @@ private struct QuickNoteEditorView: View {
     @State private var kind: QuickNoteKind
     @State private var isCompletedExpanded = true
     @State private var showBackgroundPicker = false
+    @State private var showHistory = false
     @State private var editorProxy = RichNoteEditorProxy()
     @State private var saveTask: Task<Void, Never>?
     @FocusState private var focusedChecklistItemID: String?
@@ -1824,11 +1859,16 @@ private struct QuickNoteEditorView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Color.primary)
 
-                Text("Updated \(note.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Updated \(note.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
 
-                Spacer()
+                    DeviceOriginLabel(origin: note.origin, prefix: "Created on")
+                }
+
+                Spacer(minLength: 8)
 
                 headerSquareButton(icon: note.isPinned ? "pin.fill" : "pin", color: note.isPinned ? Color.orange : Color.primary, tooltip: note.isPinned ? "Unpin note" : "Pin note", action: onTogglePin)
 
@@ -1906,8 +1946,8 @@ private struct QuickNoteEditorView: View {
                             .font(.system(size: 8, weight: .bold))
                             .foregroundStyle(Color.primary)
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .frame(height: 28)
                     .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -1932,18 +1972,13 @@ private struct QuickNoteEditorView: View {
 
                 toolbarDivider
 
-                // MARK: - Extra Tools (Link, Timestamp, Divider)
+                // MARK: - Extra Tools (History, Divider)
                 Group {
-                    toolButton(icon: "link", tooltip: "Insert Link") {
-                        applyInline(.link) { insertMarkdown(prefix: "[", suffix: "](https://)", placeholder: "link text") }
+                    toolButton(icon: "clock", tooltip: "History") {
+                        showHistory = true
                     }
-                    toolButton(icon: "clock", tooltip: "Insert Timestamp") {
-                        let timestamp = Date().formatted(date: .abbreviated, time: .shortened)
-                        if kind == .text {
-                            editorProxy.insertText(timestamp)
-                        } else {
-                            insertMarkdown(prefix: timestamp)
-                        }
+                    .sheet(isPresented: $showHistory) {
+                        NoteHistoryView(note: note, onRestore: restore)
                     }
                     toolButton(icon: "divide", tooltip: "Insert Line Divider") {
                         applyBlock(.divider) { insertMarkdown(prefix: "---") }
@@ -1990,14 +2025,6 @@ private struct QuickNoteEditorView: View {
     private func applyBlock(_ type: NoteBlockType, checklistFallback: () -> Void) {
         if kind == .text {
             editorProxy.applyBlock(type)
-        } else {
-            checklistFallback()
-        }
-    }
-
-    private func applyInline(_ format: NoteInlineFormat, checklistFallback: () -> Void) {
-        if kind == .text {
-            editorProxy.apply(format)
         } else {
             checklistFallback()
         }
@@ -2074,6 +2101,17 @@ private struct QuickNoteEditorView: View {
         }
         debounceSave(checklist: checklistItems)
         focusedChecklistItemID = newItem.id
+    }
+
+    private func restore(_ revision: NoteRevision) {
+        // A pending debounced save would otherwise write the pre-restore content back.
+        saveTask?.cancel()
+        title = revision.title
+        text = revision.text
+        checklistItems = revision.checklistItems
+        kind = revision.kind
+        QuickNoteManager.shared.restore(note, to: revision)
+        showHistory = false
     }
 
     private func removeChecklistItem(_ id: String) {
@@ -2246,8 +2284,11 @@ private struct AppClipboardCard: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Color.primary.opacity(0.06), in: Capsule())
+                        .fixedSize()
 
-                    Spacer()
+                    DeviceOriginLabel(origin: item.origin)
+
+                    Spacer(minLength: 0)
 
                     if isHovering || isSelected || item.isPinned {
                         HStack(spacing: 4) {
@@ -2419,6 +2460,7 @@ private struct AppDetailInspectorView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                DeviceOriginLabel(origin: item.origin, prefix: "on")
             }
             .layoutPriority(1)
 

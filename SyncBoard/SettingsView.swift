@@ -606,6 +606,9 @@ struct SettingsView: View {
                         }
                         .pickerStyle(.menu)
                         .controlSize(.regular)
+                        .onChange(of: settings.syncIntervalMinutes) {
+                            driveSync.restartSyncTimer()
+                        }
 
                         Toggle("Sync masked & sensitive items to cloud storage", isOn: $settings.syncSensitiveContent)
                             .controlSize(.regular)

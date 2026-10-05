@@ -43,12 +43,15 @@ final class GoogleDriveAuthManager {
 
     private(set) var accountEmail: String?
     var isConnected: Bool {
-        guard accountEmail != nil else { return false }
-        return KeychainStore.string(forKey: Keys.refreshToken) != nil
+        accountEmail != nil && hasRefreshToken
     }
 
+    /// Mirrors the Keychain entry, which only this class writes, so hot paths
+    /// like per-keystroke `scheduleSync()` don't hit the Keychain each time.
+    private var hasRefreshToken: Bool
     private var accessToken: String?
     private var accessTokenExpiry: Date?
+    private var refreshTask: Task<TokenResponse, Error>?
     private var webAuthSession: ASWebAuthenticationSession?
     private let presentationProvider = PresentationAnchorProvider()
 
@@ -59,7 +62,8 @@ final class GoogleDriveAuthManager {
 
     private init() {
         let storedEmail = UserDefaults.standard.string(forKey: Keys.emailStorageKey)
-        if let storedEmail, KeychainStore.string(forKey: Keys.refreshToken) != nil {
+        hasRefreshToken = KeychainStore.string(forKey: Keys.refreshToken) != nil
+        if let storedEmail, hasRefreshToken {
             self.accountEmail = storedEmail
         } else {
             // Clean up any stale state
@@ -85,6 +89,7 @@ final class GoogleDriveAuthManager {
             )
         }
         KeychainStore.set(refreshToken, forKey: Keys.refreshToken)
+        hasRefreshToken = KeychainStore.string(forKey: Keys.refreshToken) != nil
         accessToken = tokens.accessToken
         accessTokenExpiry = Date().addingTimeInterval(tokens.expiresIn)
 
@@ -95,6 +100,7 @@ final class GoogleDriveAuthManager {
 
     func disconnect() {
         KeychainStore.removeValue(forKey: Keys.refreshToken)
+        hasRefreshToken = false
         UserDefaults.standard.removeObject(forKey: Keys.emailStorageKey)
         accessToken = nil
         accessTokenExpiry = nil
@@ -103,16 +109,23 @@ final class GoogleDriveAuthManager {
 
     /// Returns a valid access token, transparently refreshing it from the
     /// stored refresh token if the cached one is missing or close to expiry.
+    /// Concurrent callers share a single in-flight refresh.
     func validAccessToken() async throws -> String {
         if let accessToken, let accessTokenExpiry, accessTokenExpiry > Date().addingTimeInterval(60) {
             return accessToken
+        }
+        if let refreshTask {
+            return try await refreshTask.value.accessToken
         }
         guard let refreshToken = KeychainStore.string(forKey: Keys.refreshToken) else {
             // Clean up desynced account email if token was wiped
             disconnect()
             throw GoogleDriveAuthError.noRefreshToken
         }
-        let tokens = try await refreshAccessToken(refreshToken: refreshToken)
+        let task = Task { try await refreshAccessToken(refreshToken: refreshToken) }
+        refreshTask = task
+        defer { refreshTask = nil }
+        let tokens = try await task.value
         accessToken = tokens.accessToken
         accessTokenExpiry = Date().addingTimeInterval(tokens.expiresIn)
         return tokens.accessToken

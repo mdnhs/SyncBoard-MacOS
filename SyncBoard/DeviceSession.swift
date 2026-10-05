@@ -17,6 +17,19 @@ nonisolated struct DeviceSession: Codable, Identifiable, Hashable {
     var lastSeenAt: Date
 }
 
+/// The device a clipboard item, note, or task was created on. The name is
+/// captured at creation so it still shows after that device leaves the registry.
+nonisolated struct DeviceOrigin: Codable, Hashable {
+    let id: String
+    let name: String
+
+    static var current: DeviceOrigin {
+        DeviceOrigin(id: DeviceIdentity.currentID, name: DeviceIdentity.currentName)
+    }
+
+    var isCurrentDevice: Bool { id == DeviceIdentity.currentID }
+}
+
 /// Stable identity and descriptive info for the device SyncBoard is running on.
 /// Marked `nonisolated` so it can be read from the background `GoogleDriveDeviceService`
 /// actor as well as MainActor UI code, since none of its data is actor-affine.

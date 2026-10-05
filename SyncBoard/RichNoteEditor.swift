@@ -1010,11 +1010,6 @@ final class RichNoteEditorProxy {
         }
     }
 
-    func insertText(_ text: String) {
-        guard let textView = focusedTextView() else { return }
-        textView.replace(textView.selectedRange(), with: text)
-    }
-
     private func focusedTextView() -> NoteTextView? {
         guard let textView else { return nil }
         if textView.window?.firstResponder !== textView {

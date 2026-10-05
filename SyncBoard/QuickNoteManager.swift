@@ -57,6 +57,17 @@ final class QuickNoteManager {
         saveAndSync()
     }
 
+    func restore(_ note: QuickNote, to revision: NoteRevision) {
+        guard let index = syncNotes.firstIndex(where: { $0.id == note.id }),
+              !revision.hasSameContent(as: syncNotes[index]) else { return }
+        syncNotes[index].title = revision.title
+        syncNotes[index].text = revision.text
+        syncNotes[index].checklistItems = revision.checklistItems
+        syncNotes[index].kind = revision.kind
+        syncNotes[index].updatedAt = Date()
+        saveAndSync()
+    }
+
     /// Splits an existing text note's lines into checklist rows and flips
     /// its kind — matching how Google Keep offers to turn a note into a checklist.
     func convertToChecklist(_ note: QuickNote) {
@@ -155,9 +166,11 @@ final class QuickNoteManager {
     /// Replaces local notes with the result of a Google Drive merge.
     func replaceNotes(with items: [QuickNote]) {
         let cutoff = Date().addingTimeInterval(-tombstoneLifetime)
-        syncNotes = items
+        let latest = items
             .filter { ($0.deletedAt ?? .distantFuture) > cutoff }
             .sorted { $0.sortOrder < $1.sortOrder }
+        guard latest != syncNotes else { return }
+        syncNotes = latest
         saveNotes()
     }
 

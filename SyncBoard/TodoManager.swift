@@ -86,9 +86,11 @@ final class TodoManager {
     /// Replaces local items with the result of a Google Drive merge.
     func replaceItems(with items: [TodoItem]) {
         let cutoff = Date().addingTimeInterval(-tombstoneLifetime)
-        syncItems = items
+        let latest = items
             .filter { ($0.deletedAt ?? .distantFuture) > cutoff }
             .sorted { $0.updatedAt > $1.updatedAt }
+        guard latest != syncItems else { return }
+        syncItems = latest
         saveItems()
     }
 

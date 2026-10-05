@@ -111,6 +111,7 @@ final class ClipboardManager {
             let trimmedUnpinned = Array(unpinned.prefix(maxHistoryCount))
             merged = (pinned + trimmedUnpinned).sorted(by: { $0.date > $1.date })
         }
+        guard merged != history else { return }
         history = merged
         saveHistory()
     }
@@ -196,8 +197,8 @@ final class ClipboardManager {
             return
         }
 
-        let isSensitiveItem = isConcealed ? true : (AppSettings.shared.maskSensitiveContent ? nil : false)
-        history.insert(ClipboardItem(text: text, isSensitive: isSensitiveItem), at: 0)
+        let isSensitiveItem: Bool? = AppSettings.shared.maskSensitiveContent ? nil : false
+        history.insert(ClipboardItem(text: text, isSensitive: isSensitiveItem, isConcealed: isConcealed), at: 0)
         trimHistoryIfNeeded()
         saveHistory()
         GoogleDriveSyncManager.shared.scheduleSync()

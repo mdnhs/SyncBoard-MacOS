@@ -187,6 +187,8 @@ struct QuickNote: Identifiable, Codable, Equatable, Hashable {
     var updatedAt: Date
     /// Tombstone: kept and synced so the Drive merge can't resurrect a deleted note.
     var deletedAt: Date?
+    /// `nil` for notes created before origins were recorded.
+    let origin: DeviceOrigin?
 
     init(
         id: String = ULID.generate(),
@@ -203,7 +205,8 @@ struct QuickNote: Identifiable, Codable, Equatable, Hashable {
         positionUpdatedAt: Date = .distantPast,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
-        deletedAt: Date? = nil
+        deletedAt: Date? = nil,
+        origin: DeviceOrigin? = .current
     ) {
         self.id = id
         self.title = title
@@ -220,10 +223,11 @@ struct QuickNote: Identifiable, Codable, Equatable, Hashable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
+        self.origin = origin
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, text, checklistItems, kind, color, theme, customThemeId, isPinned, isArchived, sortOrder, positionUpdatedAt, createdAt, updatedAt, deletedAt
+        case id, title, text, checklistItems, kind, color, theme, customThemeId, isPinned, isArchived, sortOrder, positionUpdatedAt, createdAt, updatedAt, deletedAt, origin
     }
 
     // Custom decoding for backward compatibility with notes saved before
@@ -246,6 +250,7 @@ struct QuickNote: Identifiable, Codable, Equatable, Hashable {
         sortOrder = try container.decodeIfPresent(Double.self, forKey: .sortOrder) ?? -updatedAt.timeIntervalSince1970
         positionUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .positionUpdatedAt) ?? .distantPast
         deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+        origin = try container.decodeIfPresent(DeviceOrigin.self, forKey: .origin)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -265,6 +270,7 @@ struct QuickNote: Identifiable, Codable, Equatable, Hashable {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encodeIfPresent(deletedAt, forKey: .deletedAt)
+        try container.encodeIfPresent(origin, forKey: .origin)
     }
 }
 

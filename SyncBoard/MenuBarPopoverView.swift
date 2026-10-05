@@ -475,6 +475,10 @@ private struct PopoverRow: View {
                     Text(item.contentKind.displayLabel)
                         .font(.caption)
                         .foregroundStyle(item.contentKind.color)
+
+                    Spacer(minLength: 0)
+
+                    DeviceOriginLabel(origin: item.origin)
                 }
             }
         }

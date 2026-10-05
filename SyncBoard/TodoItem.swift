@@ -36,6 +36,8 @@ struct TodoItem: Identifiable, Codable, Equatable, Hashable {
     var updatedAt: Date
     /// Tombstone: kept and synced so the Drive merge can't resurrect a deleted task.
     var deletedAt: Date?
+    /// `nil` for tasks created before origins were recorded.
+    let origin: DeviceOrigin?
 
     var isSensitive: Bool {
         guard AppSettings.shared.maskSensitiveContent else { return false }
@@ -52,7 +54,8 @@ struct TodoItem: Identifiable, Codable, Equatable, Hashable {
         customThemeId: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
-        deletedAt: Date? = nil
+        deletedAt: Date? = nil,
+        origin: DeviceOrigin? = .current
     ) {
         self.id = id
         self.title = title
@@ -64,10 +67,11 @@ struct TodoItem: Identifiable, Codable, Equatable, Hashable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
+        self.origin = origin
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, notes, status, color, theme, customThemeId, createdAt, updatedAt, deletedAt
+        case id, title, notes, status, color, theme, customThemeId, createdAt, updatedAt, deletedAt, origin
     }
 
     // Custom decoding for backward compatibility with tasks saved before color/theme existed.
@@ -83,5 +87,6 @@ struct TodoItem: Identifiable, Codable, Equatable, Hashable {
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
         deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+        origin = try container.decodeIfPresent(DeviceOrigin.self, forKey: .origin)
     }
 }

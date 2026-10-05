@@ -35,6 +35,8 @@ struct ClipboardItemDetailView: View {
                         }
                     }
 
+                    DeviceOriginLabel(origin: item.origin, prefix: "Copied on")
+
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(item.textSegments) { segment in
                             if segment.isCode {
